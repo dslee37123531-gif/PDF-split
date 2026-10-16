@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF 분할·편집 툴</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<style>
+  :root{--bg:#f4f5f7;--card:#fff;--line:#d9dce1;--text:#1f2430;--sub:#6b7280;--accent:#2563eb;--danger:#dc2626;--ok:#16a34a}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;background:var(--bg);color:var(--text)}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:12px 20px;position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  h1{font-size:18px;margin:0 10px 0 0}
+  button,.btn{font:inherit;font-size:14px;padding:8px 14px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;color:var(--text);text-decoration:none;display:inline-block}
+  button:hover,.btn:hover{background:#f0f3f8}
+  button.primary,.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover,.btn.primary:hover{background:#1d4fd0}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .info{color:var(--sub);font-size:13px;margin-left:auto}
+  main{padding:20px}
+  #drop{border:2px dashed var(--line);border-radius:14px;padding:60px 20px;text-align:center;color:var(--sub);background:#fff}
+  #drop.over{border-color:var(--accent);background:#eff5ff}
+  #drop strong{display:block;font-size:18px;color:var(--text);margin-bottom:8px}
+  #grid{display:flex;flex-wrap:wrap;align-items:stretch}
+  .slot{width:10px;margin:0 2px;display:flex;align-items:center;justify-content:center;position:relative;transition:width .15s}
+  .slot button{position:absolute;opacity:0;pointer-events:none;white-space:nowrap;z-index:5;padding:6px 8px;font-size:12px;background:var(--accent);color:#fff;border-color:var(--accent)}
+  .slot:hover{width:34px}
+  .slot:hover button{opacity:1;pointer-events:auto}
+  .slot::before{content:"";width:3px;height:70%;background:transparent;border-radius:2px;transition:background .15s}
+  .slot:hover::before{background:var(--accent)}
+  .slot.dropt::before{background:var(--ok);width:5px}
+  .page{width:170px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;margin:6px 0;text-align:center;cursor:grab}
+  .page.ins{border-color:var(--ok);box-shadow:0 0 0 2px #bbf7d0}
+  .page.removed{opacity:.35}
+  .page.removed img{filter:grayscale(1)}
+  .page.dragging{opacity:.4}
+  .thumb{height:200px;display:flex;align-items:center;justify-content:center;background:#eceef2;border-radius:6px;overflow:hidden}
+  .thumb img{max-width:100%;max-height:100%;display:block;box-shadow:0 1px 4px rgba(0,0,0,.2);background:#fff}
+  .thumb .ph{color:var(--sub);font-size:12px}
+  .meta{font-size:12px;margin-top:6px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .num{font-weight:600;color:var(--text)}
+  .tools{display:flex;gap:4px;justify-content:center;margin-top:6px}
+  .tools button{padding:4px 10px;font-size:12px;color:var(--danger)}
+  #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1f2430;color:#fff;padding:10px 18px;border-radius:8px;font-size:14px;display:none;z-index:60}
+  #busy{position:fixed;inset:0;background:rgba(255,255,255,.7);display:none;align-items:center;justify-content:center;z-index:40;font-size:16px}
+  .hint{font-size:13px;color:var(--sub);margin:0 0 12px}
+  /* 저장 결과 창 */
+  #modal{position:fixed;inset:0;background:rgba(20,24,33,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+  .box{background:#fff;border-radius:16px;padding:28px 26px 22px;width:min(420px,100%);text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+  .icon{width:56px;height:56px;border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;font-size:30px;color:#fff;background:var(--ok)}
+  .icon.err{background:var(--danger)}
+  .box h2{margin:0 0 6px;font-size:20px}
+  .box p{margin:0 0 4px;color:var(--sub);font-size:14px;word-break:break-all}
+  .box .detail{font-size:12px;background:#f4f5f7;border-radius:6px;padding:8px;margin-top:8px;text-align:left}
+  .actions{display:flex;flex-direction:column;gap:8px;margin-top:18px}
+  .actions .row{display:flex;gap:8px}
+  .actions .row>*{flex:1;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>PDF 분할·편집</h1>
+  <label class="btn" for="mainFile">PDF 열기</label>
+  <input id="mainFile" type="file" accept="application/pdf" hidden>
+  <button id="addEnd" disabled>끝에 PDF 추가</button>
+  <button id="restoreAll" disabled>삭제 취소</button>
+  <button id="reset" disabled>처음으로</button>
+  <button id="save" class="primary" disabled>💾 저장</button>
+  <span class="info" id="info">PDF를 업로드하세요</span>
+</header>
+<main>
+  <div id="drop"><strong>여기에 PDF 파일을 끌어다 놓거나 "PDF 열기"를 누르세요</strong>파일은 브라우저 안에서만 처리되며 서버로 전송되지 않습니다.</div>
+  <div id="work" hidden>
+    <p class="hint">페이지 사이에 마우스를 올리면 <b>+ 삽입</b> 버튼이 나타납니다. 페이지를 끌어 순서를 바꾸고, "삭제"로 중간 페이지를 뺄 수 있습니다.</p>
+    <div id="grid"></div>
+  </div>
+</main>
+
+<div id="modal"><div class="box" id="modalBox"></div></div>
+<input id="insFile" type="file" accept="application/pdf" hidden>
+<div id="busy">저장/처리 중...</div>
+<div id="toast"></div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const $ = s => document.querySelector(s);
+let sources = {};            // id -> {name, bytes, doc}
+let pages = [];              // {src, idx, removed, inserted}
+const thumbs = new Map();
+let srcSeq = 0, insertPos = null, dragFrom = null, renderToken = 0;
+let lastUrl = null, lastName = "";
+
+function toast(m){const t=$("#toast");t.textContent=m;t.style.display="block";clearTimeout(toast.t);toast.t=setTimeout(()=>t.style.display="none",2600)}
+function busy(v){$("#busy").style.display=v?"flex":"none"}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+
+async function loadSource(file){
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const doc = await pdfjsLib.getDocument({data: bytes.slice()}).promise;
+  const id = ++srcSeq;
+  sources[id] = {name:file.name, bytes, doc};
+  return {id, count: doc.numPages};
+}
+
+async function openMain(file){
+  if(!file || (file.type!=="application/pdf" && !/\.pdf$/i.test(file.name))){toast("PDF 파일만 올릴 수 있습니다");return}
+  busy(true);
+  try{
+    const {id,count} = await loadSource(file);
+    pages = Array.from({length:count},(_,i)=>({src:id,idx:i,removed:false,inserted:false}));
+    thumbs.clear();
+    $("#drop").hidden = true; $("#work").hidden = false;
+    render();
+  }catch(e){console.error(e);toast("PDF를 읽을 수 없습니다 (암호화/손상 가능)")}
+  busy(false);
+}
+
+async function insertFile(file, pos){
+  if(!file) return;
+  busy(true);
+  try{
+    const {id,count} = await loadSource(file);
+    pages.splice(pos,0,...Array.from({length:count},(_,i)=>({src:id,idx:i,removed:false,inserted:true})));
+    render();
+    toast(`${file.name} ${count}페이지를 삽입했습니다`);
+  }catch(e){console.error(e);toast("삽입할 PDF를 읽을 수 없습니다")}
+  busy(false);
+}
+
+function updateInfo(){
+  const keep = pages.filter(p=>!p.removed).length;
+  const rem = pages.length-keep;
+  $("#info").textContent = pages.length ? `최종 ${keep}페이지` + (rem?` · 삭제 예정 ${rem}`:"") : "PDF를 업로드하세요";
+  $("#save").disabled = keep===0;
+  $("#addEnd").disabled = $("#restoreAll").disabled = $("#reset").disabled = pages.length===0;
+}
+
+function slot(pos){
+  const s = document.createElement("div");
+  s.className="slot";
+  const b = document.createElement("button");
+  b.textContent="+ 삽입"; b.title="여기에 다른 PDF 삽입";
+  b.onclick=()=>{insertPos=pos;$("#insFile").click()};
+  s.append(b);
+  s.ondragover=e=>{e.preventDefault();s.classList.add("dropt")};
+  s.ondragleave=()=>s.classList.remove("dropt");
+  s.ondrop=e=>{
+    e.preventDefault();s.classList.remove("dropt");
+    if(dragFrom===null) return;
+    const [m]=pages.splice(dragFrom,1);
+    pages.splice(pos>dragFrom?pos-1:pos,0,m);
+    dragFrom=null;render();
+  };
+  return s;
+}
+
+function render(){
+  const g=$("#grid"); g.innerHTML="";
+  const token=++renderToken;
+  g.append(slot(0));
+  pages.forEach((p,i)=>{
+    const el=document.createElement("div");
+    el.className="page"+(p.removed?" removed":"")+(p.inserted?" ins":"");
+    el.draggable=true;
+    el.ondragstart=e=>{dragFrom=i;el.classList.add("dragging");e.dataTransfer.effectAllowed="move";e.dataTransfer.setData("text/plain",String(i))};
+    el.ondragend=()=>el.classList.remove("dragging");
+    const key=p.src+":"+p.idx;
+    el.dataset.key=key;
+    el.innerHTML=`<div class="thumb"><span class="ph">로딩...</span></div>
+      <div class="meta"><span class="num">${i+1}</span> · ${esc(sources[p.src].name)} (p.${p.idx+1})</div>
+      <div class="tools"></div>`;
+    const del=document.createElement("button");
+    del.textContent=p.removed?"되돌리기":"삭제";
+    del.onclick=()=>{p.removed=!p.removed;render()};
+    el.querySelector(".tools").append(del);
+    g.append(el, slot(i+1));
+    const c=thumbs.get(key); if(c) setThumb(el,c);
+  });
+  updateInfo();
+  (async()=>{
+    for(const el of g.querySelectorAll(".page")){
+      if(token!==renderToken) return;
+      const key=el.dataset.key;
+      if(thumbs.has(key)) continue;
+      const [s,i]=key.split(":").map(Number);
+      try{
+        const page=await sources[s].doc.getPage(i+1);
+        const vp0=page.getViewport({scale:1});
+        const vp=page.getViewport({scale:300/Math.max(vp0.width,vp0.height)});
+        const c=document.createElement("canvas");
+        c.width=vp.width;c.height=vp.height;
+        await page.render({canvasContext:c.getContext("2d"),viewport:vp}).promise;
+        const url=c.toDataURL("image/jpeg",.8);
+        thumbs.set(key,url);
+        if(token===renderToken) g.querySelectorAll(`.page[data-key="${key}"]`).forEach(x=>setThumb(x,url));
+      }catch(e){console.error(e)}
+    }
+  })();
+}
+function setThumb(el,url){el.querySelector(".thumb").innerHTML=`<img src="${url}" alt="">`}
+
+/* ---------- 저장 ---------- */
+async function buildPdf(){
+  const keep=pages.filter(p=>!p.removed);
+  const out=await PDFLib.PDFDocument.create();
+  const libDocs={};
+  // 같은 원본의 연속된 페이지는 한 번에 복사 (속도·용량 개선)
+  let i=0;
+  while(i<keep.length){
+    const s=keep[i].src, idxs=[keep[i].idx];
+    let j=i+1;
+    while(j<keep.length && keep[j].src===s){idxs.push(keep[j].idx);j++}
+    if(!libDocs[s]){
+      libDocs[s]=await PDFLib.PDFDocument.load(sources[s].bytes.slice(),{ignoreEncryption:true,updateMetadata:false,throwOnInvalidObject:false});
+    }
+    const copied=await out.copyPages(libDocs[s],idxs);
+    copied.forEach(pg=>out.addPage(pg));
+    i=j;
+  }
+  return {bytes:await out.save(),count:keep.length};
+}
+
+function showModal(html){ $("#modalBox").innerHTML=html; $("#modal").style.display="flex"; }
+function closeModal(){ $("#modal").style.display="none"; }
+
+function triggerDownload(url,name){
+  const a=document.createElement("a");
+  a.href=url; a.download=name; a.style.display="none";
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>a.remove(),1000);
+}
+
+async function save(){
+  busy(true);
+  try{
+    const {bytes,count}=await buildPdf();
+    if(lastUrl) URL.revokeObjectURL(lastUrl);
+    lastUrl=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
+    const base=Object.values(sources)[0].name.replace(/\.pdf$/i,"");
+    lastName=base+"_편집본.pdf";
+    triggerDownload(lastUrl,lastName);
+    const kb=(bytes.length/1024).toFixed(bytes.length>1048576?0:1);
+    busy(false);
+    showModal(`
+      <div class="icon">✓</div>
+      <h2>저장되었습니다</h2>
+      <p><b>${esc(lastName)}</b></p>
+      <p>${count}페이지 · ${kb} KB · 다운로드 폴더를 확인하세요</p>
+      <div class="actions">
+        <button class="primary" onclick="closeModal()">← 계속 편집하기</button>
+        <div class="row">
+          <a class="btn" href="${lastUrl}" download="${esc(lastName)}">다시 저장</a>
+          <button onclick="resetAll()">새 파일 시작</button>
+        </div>
+      </div>`);
+    toast("✓ 저장되었습니다");
+  }catch(e){
+    console.error(e);
+    busy(false);
+    showModal(`
+      <div class="icon err">!</div>
+      <h2>저장하지 못했습니다</h2>
+      <p>잠시 후 다시 시도해 주세요.</p>
+      <div class="detail">${esc(e&&e.message||e)}</div>
+      <div class="actions"><button class="primary" onclick="closeModal()">← 돌아가서 다시 시도</button></div>`);
+  }
+}
+
+function resetAll(){
+  closeModal();
+  if(lastUrl){URL.revokeObjectURL(lastUrl);lastUrl=null}
+  sources={};pages=[];thumbs.clear();renderToken++;
+  $("#grid").innerHTML="";
+  $("#work").hidden=true;$("#drop").hidden=false;
+  updateInfo();
+}
+
+$("#mainFile").onchange=e=>{openMain(e.target.files[0]);e.target.value=""};
+$("#insFile").onchange=e=>{const f=e.target.files[0];e.target.value="";insertFile(f,insertPos)};
+$("#addEnd").onclick=()=>{insertPos=pages.length;$("#insFile").click()};
+$("#restoreAll").onclick=()=>{pages.forEach(p=>p.removed=false);render()};
+$("#reset").onclick=()=>{ if(confirm("편집 내용을 버리고 처음으로 돌아갈까요?")) resetAll(); };
+$("#save").onclick=save;
+$("#modal").onclick=e=>{if(e.target.id==="modal")closeModal()};
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal()});
+
+const drop=$("#drop");
+document.addEventListener("dragover",e=>{if(e.dataTransfer&&[...e.dataTransfer.types].includes("Files")){e.preventDefault();if(!pages.length)drop.classList.add("over")}});
+document.addEventListener("dragleave",e=>{if(!e.relatedTarget)drop.classList.remove("over")});
+document.addEventListener("drop",e=>{
+  drop.classList.remove("over");
+  if(e.dataTransfer&&e.dataTransfer.files.length){
+    e.preventDefault();
+    if(!pages.length) openMain(e.dataTransfer.files[0]);
+  }
+});
+</script>
+</body>
+</html>
